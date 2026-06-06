@@ -1,0 +1,26 @@
+DatasetHeader Begin
+	DataSetType	= ERStorage
+	DataType	= Raster
+	ByteOrder	= LSBFirst
+	Comments	= "File created with Digiterra Map"
+	CoordinateSpace Begin
+		Datum		= "SAD69"
+		Projection	= "LOCAL"
+		CoordinateType	= EN
+		Rotation	= 0:0:0.0
+	CoordinateSpace End
+	RasterInfo Begin
+		CellType	= IEEE4ByteReal
+		CellInfo Begin
+			Xdimension	= 5
+			Ydimension	= 5
+		CellInfo End
+		NrOfLines		= 200
+		NrOfCellsPerLine	= 200
+		RegistrationCoord Begin
+			Eastings	= 544002,5
+			Northings	= 131997,5
+		RegistrationCoord End
+		NrOfBands	= 1
+	RasterInfo End
+DatasetHeader End

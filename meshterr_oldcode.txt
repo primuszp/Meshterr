@@ -1,0 +1,134 @@
+        private void SlidingSixAlgorithm()
+        {
+            nData = new Vector3d[nrOfCellsPerLine, nrOfLines];
+
+            for (int y = 0; y < nrOfLines; y++)
+            {
+                for (int x = 0; x < nrOfCellsPerLine; x++)
+                {
+                    Vector3d sum = new Vector3d(0.0f, 0.0f, 0.0f);
+
+                    if ((x > 0 && y > 0) && (x < NrOfCellsPerLine - 1 && y < nrOfLines - 1))
+                    {
+                        Vector3d v0 = new Vector3d(x * xDimension, y * yDimension, zData[x, y]);
+                        Vector3d v1 = new Vector3d((x - 1) * xDimension, y * yDimension, zData[x - 1, y]);
+                        Vector3d v2 = new Vector3d(x * xDimension, (y - 1) * yDimension, zData[x, y - 1]);
+                        Vector3d v3 = new Vector3d((x + 1) * xDimension, (y - 1) * yDimension, zData[x + 1, y - 1]);
+                        Vector3d v4 = new Vector3d((x + 1) * xDimension, y * yDimension, zData[x + 1, y]);
+                        Vector3d v5 = new Vector3d(x * xDimension, (y + 1) * yDimension, zData[x, y + 1]);
+                        Vector3d v6 = new Vector3d((x - 1) * xDimension, (y + 1) * yDimension, zData[x - 1, y + 1]);
+
+                        sum += 2 * ((v1 - v0) % (v2 - v0));
+                        sum += 1 * ((v2 - v0) % (v3 - v0));
+                        sum += 1 * ((v3 - v0) % (v4 - v0));
+                        sum += 2 * ((v4 - v0) % (v5 - v0));
+                        sum += 1 * ((v5 - v0) % (v6 - v0));
+                        sum += 1 * ((v6 - v0) % (v1 - v0));
+                        nData[x, y] = Vector3d.Normalize(sum / 8);
+                    }
+                    else
+                        if ((x == 0) && (y > 0 && y < nrOfLines - 1))
+                        {
+                            Vector3d v0 = new Vector3d(x * xDimension, y * yDimension, zData[x, y]);
+                            Vector3d v1 = new Vector3d(x * xDimension, (y - 1) * yDimension, zData[x, y - 1]);
+                            Vector3d v2 = new Vector3d((x + 1) * xDimension, (y - 1) * yDimension, zData[x + 1, y - 1]);
+                            Vector3d v3 = new Vector3d((x + 1) * xDimension, y * yDimension, zData[x + 1, y]);
+                            Vector3d v4 = new Vector3d(x * xDimension, (y + 1) * yDimension, zData[x, y + 1]);
+
+                            sum += ((v1 - v0) % (v2 - v0));
+                            sum += ((v2 - v0) % (v3 - v0));
+                            sum += ((v3 - v0) % (v4 - v0));
+                            nData[x, y] = Vector3d.Normalize(sum / 3.0);
+                        }
+                        else
+                            if ((x == NrOfCellsPerLine - 1) && (y > 0 && y < nrOfLines - 1))
+                            {
+                                Vector3d v0 = new Vector3d(x * xDimension, y * yDimension, zData[x, y]);
+                                Vector3d v1 = new Vector3d(x * xDimension, (y - 1) * yDimension, zData[x, y - 1]);
+                                Vector3d v2 = new Vector3d((x - 1) * xDimension, y * yDimension, zData[x - 1, y]);
+                                Vector3d v3 = new Vector3d((x - 1) * xDimension, (y + 1) * yDimension, zData[x - 1, y + 1]);
+                                Vector3d v4 = new Vector3d(x * xDimension, (y + 1) * yDimension, zData[x, y + 1]);
+
+                                sum += ((v1 - v0) % (v2 - v0));
+                                sum += ((v2 - v0) % (v3 - v0));
+                                sum += ((v3 - v0) % (v4 - v0));
+                                nData[x, y] = Vector3d.Normalize(-sum / 3.0);
+                            }
+                            else
+                            {
+                                nData[x, y] = new Vector3d(0, 0, 0);
+                            }
+                }
+            }
+        }       
+
+	//private void RenderVertices(float size)
+        //{
+        //    if (zData != null)
+        //    {
+        //        int offsetX = (int) (Box.Width  / 2);
+        //        int offsetY = (int) (Box.Height / 2);
+
+        //        //GL.Color3(Color.Black);
+        //        //GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+
+        //        for (int y = 0; y < NrOfLines - 1; y++)
+        //        {
+        //            GL.Begin(BeginMode.TriangleStrip);
+
+        //            for (int x = 0; x < NrOfCellsPerLine - 1; x++)
+        //            {
+        //                GL.Color3(RsgPalettte.InterColor(zData[x, y] / maxElevation));
+        //                GL.Vertex3(x * XDimension - offsetX, y * YDimension - offsetY, zData[x, y] * Distoration);
+
+        //                GL.Color3(RsgPalettte.InterColor(zData[x, y + 1] / maxElevation));
+        //                GL.Vertex3(x * XDimension - offsetX, (y + 1) * YDimension - offsetY, zData[x, y + 1] * Distoration);
+
+        //                GL.Color3(RsgPalettte.InterColor(zData[x + 1, y] / maxElevation));
+        //                GL.Vertex3((x + 1) * XDimension - offsetX, y * YDimension - offsetY, zData[x + 1, y] * Distoration);
+
+        //                GL.Color3(RsgPalettte.InterColor(zData[x + 1, y + 1] / maxElevation));
+        //                GL.Vertex3((x + 1) * XDimension - offsetX, (y + 1) * YDimension - offsetY, zData[x + 1, y + 1] * Distoration);
+        //            }
+
+        //            GL.End();
+        //        }
+        //    }
+        //}
+
+                //GL.Color3(Color.White);
+                //for (int y = 0; y < NrOfLines; y++)
+                //{
+                //    for (int x = 0; x < NrOfCellsPerLine; x++)
+                //    {
+                //        GL.Begin(BeginMode.Lines);
+
+                //        GL.Vertex3(x * XDimension - offsetX, y * YDimension - offsetY, zData[x, y] * Distoration);
+                //        GL.Vertex3((x * XDimension - offsetX) + nData[x, y].X * 3 * 10, (y * YDimension - offsetY) + nData[x, y].Y * 3 * 10, (zData[x, y] * Distoration) + nData[x, y].Z * 10);
+
+                //        GL.End();
+                //    }
+                //}
+
+
+            float[,] pixels = new float[,]{ 
+            {1,1,1,1},
+            {0.75f, 0.75f, 0.75f, 0.75f },
+            {0.5f, 0.5f, 0.5f, 0.5f },
+            {0.25f, 0.25f, 0.25f, 0.25f }
+            };
+
+            GL.WindowPos2(100, 100);
+            GL.DrawPixels(4, 4, PixelFormat.Green, PixelType.Float, pixels);
+
+       
+
+	private void DrawPos(Vector3 position)
+        {
+            GL.Color3(Color.Red);
+            IntPtr quadric = Glu.NewQuadric();
+            GL.PushMatrix();
+            GL.Translate(position.X, position.Y, position.Z);
+            Glu.Sphere(quadric, 20, 16, 10);
+            GL.PopMatrix();
+        }

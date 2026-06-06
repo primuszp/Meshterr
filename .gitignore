@@ -1,0 +1,43 @@
+# Build output
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+arm64/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.DotSettings.user
+
+# .NET
+TestResults/
+*.nupkg
+*.snupkg
+project.lock.json
+artifacts/
+
+# Obsolete vendored binaries from the modernized Meshterr app.
+# The current app uses NuGet packages and source compatibility shims instead.
+source/Meshterr/dlls/
+
+# Logs and diagnostics
+*.log
+*.binlog
+*.dmp
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local scratch space
+.tmp/
