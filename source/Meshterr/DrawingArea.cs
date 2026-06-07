@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -11,11 +11,11 @@ namespace Meshterr
     {
         #region Private Members
 
-        private bool loaded=false;
-        private bool fresh = true;
-        private float zoom = 0.5f;
-        private float rotx = 0.0f;
-        private float roty = 0.0f;
+        private bool loaded = false;
+        private bool fresh  = true;
+        private float zoom  = 0.5f;
+        private float rotx  = 0.0f;
+        private float roty  = 0.0f;
         private float znear = -1f;
         private float zfar  = +1f;
 
@@ -31,16 +31,37 @@ namespace Meshterr
         private int lastix = 0;
         private int lastiy = 0;
 
-        private double[] projeMatrix = new double[16];
-        private double[] modelMatrix = new double[16];
-        private int[] viewportMatrix = new int[4];
-        private Vector3 worldPosition = new Vector3();
+        private double[] projeMatrix   = new double[16];
+        private double[] modelMatrix   = new double[16];
+        private int[]    viewportMatrix = new int[4];
+        private Vector3  worldPosition  = new Vector3();
 
-        // Forgatási pivot – az egér alatti 3D felszíni pont, egér-gomb lenyomásakor rögzítve
-        private Vector3 pivot = Vector3.Zero;
+        // ── Forgatási rendszer ────────────────────────────────────────────────
+        // Modelview = T(pivotEyeX, pivotEyeY, 0) · Rx(rotx) · Rz(roty) · T(−pivotModel)
+        //
+        // Bal klikknél:
+        //   pivotEyeX/Y = az egér eye-space koordinátái  (= mouseX/mouseY)
+        //   pivotModel  = az egér alatti 3D felszíni pont (depth-buffer unproject)
+        //
+        // Így pivotModel MINDIG a (pivotEyeX, pivotEyeY) screen-pozícióra vetül,
+        // tehát bármilyen szögből, bármilyen újabb klikknél nincs vizuális ugrás.
+        private float   pivotEyeX  = 0f;
+        private float   pivotEyeY  = 0f;
+        private Vector3 pivotModel = Vector3.Zero;
 
-        private List<IDisplayList> displayLists = new List<IDisplayList>();
-        private RenderingType renderOptions = RenderingType.Shaded;
+        private List<IDisplayList> displayLists  = new List<IDisplayList>();
+        private RenderingType      renderOptions = RenderingType.Shaded;
+
+        // ── ViewCube ──────────────────────────────────────────────────────────
+        private int   vcHoveredFace  = -1;   // -1 = nincs hover
+        private bool  vcAnimating    = false;
+        private float vcAnimProgress = 1f;   // 0=start, 1=kész
+        private float vcAnimStartRx, vcAnimStartRy;
+        private float vcAnimTargetRx, vcAnimTargetRy;
+        private const float VcAnimSteps = 25f;  // lépések száma (25 × 15 ms ≈ 375 ms)
+
+        // ViewCube-ból kezdett bal-drag blokkolása
+        private bool vcDragActive = false;
 
         #endregion
 
@@ -54,44 +75,32 @@ namespace Meshterr
 
         public float zNear
         {
-            get { return  znear; }
+            get { return znear; }
             set { znear = value; }
         }
 
         public float zFar
         {
-            get { return zfar;  }
+            get { return zfar; }
             set { zfar = value; }
         }
 
-        /// <summary>
-        /// Megjelenítés módja
-        /// </summary>
         public RenderingType RenderOptions
         {
             get { return renderOptions; }
             set
             {
                 renderOptions = value;
-                // A Display lista legenerálása
                 Regenerate();
-                // Megjelenítés
                 Render();
             }
         }
 
-        /// <summary>
-        /// A megjelenítendő objektumok listája
-        /// </summary>
         public IList<IDisplayList> DisplayLists
         {
             get { return displayLists; }
         }
 
-        /// <summary>
-        /// Objektum hozzáadása a megjelenítési listához
-        /// </summary>
-        /// <param name="obj">Az IDisplayList interface-t megvalósító objektum</param>
         public void AddObject(IDisplayList obj)
         {
             EnsureContext();
@@ -101,10 +110,6 @@ namespace Meshterr
             glControl.Invalidate();
         }
 
-        /// <summary>
-        /// Objektum törlése a megjelenítési listáról
-        /// </summary>
-        /// <param name="obj">Az IDisplayList interface-t megvalósító objektum</param>
         public void DeleteObject(IDisplayList obj)
         {
             if (DisplayLists.Contains(obj))
@@ -116,10 +121,7 @@ namespace Meshterr
 
         public Vector3 WorldPosition
         {
-            get
-            {
-                return (worldPosition);
-            }
+            get { return worldPosition; }
         }
 
         #endregion
@@ -133,55 +135,48 @@ namespace Meshterr
 
         #endregion
 
+        // ── Kamera ────────────────────────────────────────────────────────────
+
         public void FitToModel(double modelWidth, double modelHeight)
         {
             if (modelWidth <= 0 || modelHeight <= 0 || glControl.Width <= 0 || glControl.Height <= 0)
-            {
                 return;
-            }
 
             const double padding = 1.1;
-            zoom = (float)Math.Min(glControl.Width / (modelWidth * padding), glControl.Height / (modelHeight * padding));
+            zoom = (float)Math.Min(
+                glControl.Width  / (modelWidth  * padding),
+                glControl.Height / (modelHeight * padding));
 
-            if (zoom > 10000.0f)
-            {
-                zoom = 10000.0f;
-            }
-            else if (zoom < 0.005f)
-            {
-                zoom = 0.005f;
-            }
+            zoom = Math.Clamp(zoom, 0.005f, 10000.0f);
 
-            double viewWidth = glControl.Width / zoom;
+            double viewWidth  = glControl.Width  / zoom;
             double viewHeight = glControl.Height / zoom;
-            screenX = -viewWidth / 2.0;
+            screenX = -viewWidth  / 2.0;
             screenY = -viewHeight / 2.0;
+
+            // Pivot visszaállítása a jelenet közepére
+            pivotEyeX  = 0f;
+            pivotEyeY  = 0f;
+            pivotModel = Vector3.Zero;
+
             fresh = true;
         }
 
         private void EnsureContext()
         {
-            if (!loaded)
-            {
-                return;
-            }
-
-            glControl.MakeCurrent();
+            if (loaded) glControl.MakeCurrent();
         }
+
+        // ── OpenGL pipeline ───────────────────────────────────────────────────
 
         private void Reshape()
         {
-            if (!loaded)
-            {
-                return;
-            }
+            if (!loaded) return;
 
             EnsureContext();
 
             if (glControl.ClientSize.Height == 0)
-            {
                 glControl.ClientSize = new Size(glControl.ClientSize.Width, 1);
-            }
 
             float wc = (glControl.Width  - 1.0f) / zoom;
             float hc = (glControl.Height - 1.0f) / zoom;
@@ -191,8 +186,9 @@ namespace Meshterr
 
             GL.MatrixMode(MatrixMode.Projection);
             GL.LoadIdentity();
-
-            GL.Ortho(screenX - pc, screenX + wc + pc, screenY - pc, screenY + hc + pc, znear, zfar);
+            GL.Ortho(screenX - pc, screenX + wc + pc,
+                     screenY - pc, screenY + hc + pc,
+                     znear, zfar);
 
             GL.MatrixMode(MatrixMode.Modelview);
             GL.LoadIdentity();
@@ -200,10 +196,7 @@ namespace Meshterr
 
         private void Render()
         {
-            if (!loaded)
-            {
-                return;
-            }
+            if (!loaded) return;
 
             EnsureContext();
 
@@ -213,32 +206,17 @@ namespace Meshterr
             GL.MatrixMode(MatrixMode.Modelview);
             GL.LoadIdentity();
 
-            // Forgatás az egér alatti pont (pivot) körül:
-            // T(pivot) · Rx · Rz · T(-pivot)
-            // A pivot model-space pont ortho projekcióban vizuálisan fixálva marad
-            GL.Translate(pivot.X, pivot.Y, pivot.Z);
+            // T(pivotEye) · Rx · Rz · T(−pivotModel)
+            GL.Translate(pivotEyeX, pivotEyeY, 0f);
             GL.Rotate(rotx, 1f, 0f, 0f);
             GL.Rotate(roty, 0f, 0f, 1f);
-            GL.Translate(-pivot.X, -pivot.Y, -pivot.Z);
+            GL.Translate(-pivotModel.X, -pivotModel.Y, -pivotModel.Z);
 
-            //Draw grid
-            GL.LineWidth(1);
-            //GL.Color3(Color.White);
+            foreach (IDisplayList item in DisplayLists)
+                item.Call();
 
-            //GL.Begin(BeginMode.Lines);
-            //for (int i = -10; i <= 10; ++i)
-            //{
-            //    GL.Vertex3(i, -10, 0);
-            //    GL.Vertex3(i, 10, 0);
-            //    GL.Vertex3(10, i, 0);
-            //    GL.Vertex3(-10, i, 0);
-            //}
-            //GL.End();
-
-            foreach (IDisplayList Item in DisplayLists)
-            {
-                Item.Call();
-            }
+            // ── ViewCube renderelése ──────────────────────────────────────────
+            ViewCube.Render(glControl.Width, glControl.Height, rotx, roty, vcHoveredFace);
 
             glControl.SwapBuffers();
         }
@@ -248,6 +226,8 @@ namespace Meshterr
             Reshape();
             Render();
         }
+
+        // ── Eseménykezelők ────────────────────────────────────────────────────
 
         private void glControl_Load(object sender, EventArgs e)
         {
@@ -271,131 +251,97 @@ namespace Meshterr
 
         private void glControl_MouseWheel(object sender, MouseEventArgs e)
         {
-            float temp_zoom = zoom;
+            if (e.Button != MouseButtons.None) return;
 
-            if (e.Button == MouseButtons.None)
-            {
-                if (e.Delta > 0)
-                {
-                    zoom = zoom * 1.2f;
+            float oldZoom = zoom;
 
-                    if (zoom > 10000.0f)
-                    {
-                        zoom = 10000.0f;
-                    }
-                }
-                else
-                {
-                    zoom = zoom / 1.2f;
+            if (e.Delta > 0)
+                zoom = Math.Min(zoom * 1.2f, 10000.0f);
+            else
+                zoom = Math.Max(zoom / 1.2f, 0.005f);
 
-                    if (zoom < 0.005f)
-                    {
-                        zoom = 0.005f;
-                    }
-                }
+            // Zoom az egér pozíciója körül (screenX/Y korrekció)
+            screenX = mouseX - (mouseX - screenX) * (oldZoom / zoom);
+            screenY = mouseY - (mouseY - screenY) * (oldZoom / zoom);
 
-                screenX = mouseX - (mouseX - screenX) * (temp_zoom / zoom);
-                screenY = mouseY - (mouseY - screenY) * (temp_zoom / zoom);
-
-                fresh = true;
-            }
+            fresh = true;
         }
 
         private void glControl_MouseDown(object sender, MouseEventArgs e)
         {
             lastdx = mouseX;
             lastdy = mouseY;
+            vcDragActive = false;
 
             if (e.Button == MouseButtons.Left)
             {
-                if (TryGetWorldPosition(e, out Vector3 newPivot))
+                // ── ViewCube kattintás ────────────────────────────────────────
+                int hitFace = ViewCube.HitTest(e.X, e.Y,
+                                               glControl.Width, glControl.Height,
+                                               rotx, roty);
+                if (hitFace >= 0)
                 {
-                    SetPivotWithoutViewJump(newPivot);
-                    int mouseYFromBottom = glControl.Height - e.Y - 1;
-                    lastdx = mouseX = screenX + e.X / zoom;
-                    lastdy = mouseY = screenY + mouseYFromBottom / zoom;
-                    fresh = true;
+                    vcDragActive = true;  // drag ne induljon el a ViewCube-ból
+                    VcSnapToFace(hitFace);
+                    return;
                 }
+
+                // ── Normál pivot frissítése ───────────────────────────────────
+                // T(pivotEye)·Rx·Rz·T(−pivotModel) · pivotModel = (pivotEyeX, pivotEyeY, 0)
+                // → a pivot screen-pozíciója MINDIG az egér aktuális pozíciója → nincs ugrás.
+                int sy = glControl.Height - e.Y - 1;
+
+                EnsureContext();
+                GetOpenGLMatrices();
+
+                float[] depth = new float[1];
+                GL.ReadPixels(e.X, sy, 1, 1,
+                              PixelFormat.DepthComponent, PixelType.Float, depth);
+
+                if (depth[0] > 0.0f && depth[0] < 1.0f)
+                {
+                    Vector3 win = new Vector3(e.X, sy, depth[0]);
+                    if (GLMath.UnProject(win, modelMatrix, projeMatrix, viewportMatrix, out Vector3 mp)
+                        && IsFinite(mp))
+                    {
+                        pivotModel = mp;
+                        pivotEyeX  = (float)(screenX + (double)e.X / zoom);
+                        pivotEyeY  = (float)(screenY + (double)sy   / zoom);
+                    }
+                }
+                // Üres területen: az előző pivot marad
             }
         }
 
-        private void SetPivotWithoutViewJump(Vector3 newPivot)
+        /// <summary>Animált nézet-snap a megadott lapra.</summary>
+        private void VcSnapToFace(int faceIndex)
         {
-            Vector2 oldTranslation = PivotTranslation(pivot);
-            Vector2 newTranslation = PivotTranslation(newPivot);
-
-            screenX += newTranslation.X - oldTranslation.X;
-            screenY += newTranslation.Y - oldTranslation.Y;
-            pivot = newPivot;
+            (float rx, float ry) = ViewCube.FaceTargets[faceIndex];
+            vcAnimStartRx  = rotx;
+            vcAnimStartRy  = roty;
+            vcAnimTargetRx = rx;
+            vcAnimTargetRy = NormalizeAngleDiff(roty, ry);  // legrövidebb úton
+            vcAnimProgress = 0f;
+            vcAnimating    = true;
+            fresh = true;
         }
 
-        private Vector2 PivotTranslation(Vector3 value)
+        /// <summary>Legrövidebb forgásirány: target ± 360° közül a ±180°-on belüli változat.</summary>
+        private static float NormalizeAngleDiff(float from, float to)
         {
-            Vector3 rotated = RotateAroundOrigin(value);
-            return new Vector2(value.X - rotated.X, value.Y - rotated.Y);
+            float diff = to - from;
+            while (diff >  180f) diff -= 360f;
+            while (diff < -180f) diff += 360f;
+            return from + diff;
         }
 
-        private Vector3 RotateAroundOrigin(Vector3 value)
-        {
-            float rx = rotx * MathF.PI / 180f;
-            float rz = roty * MathF.PI / 180f;
-
-            float cosZ = MathF.Cos(rz);
-            float sinZ = MathF.Sin(rz);
-            float x1 = value.X * cosZ - value.Y * sinZ;
-            float y1 = value.X * sinZ + value.Y * cosZ;
-            float z1 = value.Z;
-
-            float cosX = MathF.Cos(rx);
-            float sinX = MathF.Sin(rx);
-            return new Vector3(
-                x1,
-                y1 * cosX - z1 * sinX,
-                y1 * sinX + z1 * cosX);
-        }
-
-        private bool TryGetWorldPosition(MouseEventArgs e, out Vector3 position)
-        {
-            position = Vector3.Zero;
-
-            if (!loaded || e.X < 0 || e.Y < 0 || e.X >= glControl.Width || e.Y >= glControl.Height)
-            {
-                return false;
-            }
-
-            EnsureContext();
-            GetOpenGLMatrices();
-
-            int sy = viewportMatrix[3] - e.Y - 1;
-            float[] depthPixel = new float[1];
-            GL.ReadPixels(e.X, sy, 1, 1, PixelFormat.DepthComponent, PixelType.Float, depthPixel);
-
-            if (float.IsNaN(depthPixel[0]) || float.IsInfinity(depthPixel[0]) || depthPixel[0] <= 0.0f || depthPixel[0] >= 1.0f)
-            {
-                return false;
-            }
-
-            Vector3 win = new Vector3(e.X, sy, depthPixel[0]);
-            if (!GLMath.UnProject(win, modelMatrix, projeMatrix, viewportMatrix, out position))
-            {
-                return false;
-            }
-
-            return IsFinite(position);
-        }
-
-        private static bool IsFinite(Vector3 value)
-        {
-            return !(float.IsNaN(value.X) || float.IsInfinity(value.X) ||
-                     float.IsNaN(value.Y) || float.IsInfinity(value.Y) ||
-                     float.IsNaN(value.Z) || float.IsInfinity(value.Z));
-        }
+        /// <summary>Smoothstep easing: t ∈ [0,1] → [0,1]</summary>
+        private static float SmoothStep(float t) => t * t * (3f - 2f * t);
 
         private void glControl_MouseMove(object sender, MouseEventArgs e)
         {
             int diffx = e.X - lastix;
             int diffy = e.Y - lastiy;
-
             lastix = e.X;
             lastiy = e.Y;
 
@@ -406,6 +352,16 @@ namespace Meshterr
                 mouseX = screenX + mouseScreenX / zoom;
                 mouseY = screenY + mouseScreenY / zoom;
                 GetModellCoords(e);
+
+                // ViewCube hover frissítése
+                int newHover = ViewCube.HitTest(e.X, e.Y,
+                                                glControl.Width, glControl.Height,
+                                                rotx, roty);
+                if (newHover != vcHoveredFace)
+                {
+                    vcHoveredFace = newHover;
+                    fresh = true;
+                }
             }
             else if (e.Button == MouseButtons.Right)
             {
@@ -413,63 +369,66 @@ namespace Meshterr
                 screenY = lastdy - (glControl.Height - e.Y) / zoom;
                 fresh = true;
             }
-            else
-                if (e.Button == MouseButtons.Left)
-                {
-                    rotx += 0.5f * diffy;
-                    roty += 0.5f * diffx;
-                    fresh = true;
-                }
+            else if (e.Button == MouseButtons.Left && !vcDragActive)
+            {
+                rotx += 0.5f * diffy;
+                roty += 0.5f * diffx;
+                fresh = true;
+            }
         }
 
-        /// <summary>
-        /// OpenGL mátrixok lekérdezése
-        /// </summary>
+        // ── Segédmetódusok ────────────────────────────────────────────────────
+
         private void GetOpenGLMatrices()
         {
-            GL.GetDouble(GetPName.ProjectionMatrix, projeMatrix);
-            GL.GetDouble(GetPName.ModelviewMatrix, modelMatrix);
-            GL.GetInteger(GetPName.Viewport, viewportMatrix);
+            GL.GetDouble(GetPName.ProjectionMatrix,  projeMatrix);
+            GL.GetDouble(GetPName.ModelviewMatrix,   modelMatrix);
+            GL.GetInteger(GetPName.Viewport,         viewportMatrix);
         }
 
-        /// <summary>
-        /// Világkoordináta lekérdezése
-        /// </summary>
-        /// <param name="e">MouseEventArgs</param>
         public void GetModellCoords(MouseEventArgs e)
         {
-            if (!loaded)
-            {
-                return;
-            }
+            if (!loaded) return;
 
-            float[] pixel = new float[1];
-
-            //Mátrixok lekérdezése
             GetOpenGLMatrices();
 
-            GL.ReadPixels(e.X, viewportMatrix[3] - e.Y, 1, 1, PixelFormat.DepthComponent, PixelType.Float, pixel);
+            float[] pixel = new float[1];
+            GL.ReadPixels(e.X, viewportMatrix[3] - e.Y, 1, 1,
+                          PixelFormat.DepthComponent, PixelType.Float, pixel);
 
             Vector3 win = new Vector3(e.X, viewportMatrix[3] - e.Y, pixel[0]);
-
             GLMath.UnProject(win, modelMatrix, projeMatrix, viewportMatrix, out worldPosition);
         }
 
-        /// <summary>
-        /// Regenerate all the display list objects using the new rendering options.
-        /// </summary>
+        private static bool IsFinite(Vector3 v)
+        {
+            return float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+        }
+
         private void Regenerate()
         {
             EnsureContext();
-
             foreach (IDisplayList item in displayLists)
-            {
                 item.Regenerate(renderOptions);
-            }
         }
 
         private void TimerTick(object sender, EventArgs e)
         {
+            // ViewCube animáció léptetése
+            if (vcAnimating)
+            {
+                vcAnimProgress += 1f / VcAnimSteps;
+                if (vcAnimProgress >= 1f)
+                {
+                    vcAnimProgress = 1f;
+                    vcAnimating    = false;
+                }
+                float t = SmoothStep(vcAnimProgress);
+                rotx  = vcAnimStartRx + t * (vcAnimTargetRx - vcAnimStartRx);
+                roty  = vcAnimStartRy + t * (vcAnimTargetRy - vcAnimStartRy);
+                fresh = true;
+            }
+
             if (fresh)
             {
                 Redisplay();
