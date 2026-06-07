@@ -36,6 +36,9 @@ namespace Meshterr
         private int[] viewportMatrix = new int[4];
         private Vector3 worldPosition = new Vector3();
 
+        // Forgatási pivot – az egér alatti 3D felszíni pont, egér-gomb lenyomásakor rögzítve
+        private Vector3 pivot = Vector3.Zero;
+
         private List<IDisplayList> displayLists = new List<IDisplayList>();
         private RenderingType renderOptions = RenderingType.Shaded;
 
@@ -207,10 +210,16 @@ namespace Meshterr
             GL.ClearColor(Color.LightSkyBlue);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-            //GL.PushMatrix();
+            GL.MatrixMode(MatrixMode.Modelview);
+            GL.LoadIdentity();
 
+            // Forgatás az egér alatti pont (pivot) körül:
+            // T(pivot) · Rx · Rz · T(-pivot)
+            // A pivot model-space pont ortho projekcióban vizuálisan fixálva marad
+            GL.Translate(pivot.X, pivot.Y, pivot.Z);
             GL.Rotate(rotx, 1f, 0f, 0f);
             GL.Rotate(roty, 0f, 0f, 1f);
+            GL.Translate(-pivot.X, -pivot.Y, -pivot.Z);
 
             //Draw grid
             GL.LineWidth(1);
@@ -230,8 +239,6 @@ namespace Meshterr
             {
                 Item.Call();
             }
-
-            //GL.PopMatrix();
 
             glControl.SwapBuffers();
         }
@@ -298,6 +305,90 @@ namespace Meshterr
         {
             lastdx = mouseX;
             lastdy = mouseY;
+
+            if (e.Button == MouseButtons.Left)
+            {
+                if (TryGetWorldPosition(e, out Vector3 newPivot))
+                {
+                    SetPivotWithoutViewJump(newPivot);
+                    int mouseYFromBottom = glControl.Height - e.Y - 1;
+                    lastdx = mouseX = screenX + e.X / zoom;
+                    lastdy = mouseY = screenY + mouseYFromBottom / zoom;
+                    fresh = true;
+                }
+            }
+        }
+
+        private void SetPivotWithoutViewJump(Vector3 newPivot)
+        {
+            Vector2 oldTranslation = PivotTranslation(pivot);
+            Vector2 newTranslation = PivotTranslation(newPivot);
+
+            screenX += newTranslation.X - oldTranslation.X;
+            screenY += newTranslation.Y - oldTranslation.Y;
+            pivot = newPivot;
+        }
+
+        private Vector2 PivotTranslation(Vector3 value)
+        {
+            Vector3 rotated = RotateAroundOrigin(value);
+            return new Vector2(value.X - rotated.X, value.Y - rotated.Y);
+        }
+
+        private Vector3 RotateAroundOrigin(Vector3 value)
+        {
+            float rx = rotx * MathF.PI / 180f;
+            float rz = roty * MathF.PI / 180f;
+
+            float cosZ = MathF.Cos(rz);
+            float sinZ = MathF.Sin(rz);
+            float x1 = value.X * cosZ - value.Y * sinZ;
+            float y1 = value.X * sinZ + value.Y * cosZ;
+            float z1 = value.Z;
+
+            float cosX = MathF.Cos(rx);
+            float sinX = MathF.Sin(rx);
+            return new Vector3(
+                x1,
+                y1 * cosX - z1 * sinX,
+                y1 * sinX + z1 * cosX);
+        }
+
+        private bool TryGetWorldPosition(MouseEventArgs e, out Vector3 position)
+        {
+            position = Vector3.Zero;
+
+            if (!loaded || e.X < 0 || e.Y < 0 || e.X >= glControl.Width || e.Y >= glControl.Height)
+            {
+                return false;
+            }
+
+            EnsureContext();
+            GetOpenGLMatrices();
+
+            int sy = viewportMatrix[3] - e.Y - 1;
+            float[] depthPixel = new float[1];
+            GL.ReadPixels(e.X, sy, 1, 1, PixelFormat.DepthComponent, PixelType.Float, depthPixel);
+
+            if (float.IsNaN(depthPixel[0]) || float.IsInfinity(depthPixel[0]) || depthPixel[0] <= 0.0f || depthPixel[0] >= 1.0f)
+            {
+                return false;
+            }
+
+            Vector3 win = new Vector3(e.X, sy, depthPixel[0]);
+            if (!GLMath.UnProject(win, modelMatrix, projeMatrix, viewportMatrix, out position))
+            {
+                return false;
+            }
+
+            return IsFinite(position);
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return !(float.IsNaN(value.X) || float.IsInfinity(value.X) ||
+                     float.IsNaN(value.Y) || float.IsInfinity(value.Y) ||
+                     float.IsNaN(value.Z) || float.IsInfinity(value.Z));
         }
 
         private void glControl_MouseMove(object sender, MouseEventArgs e)

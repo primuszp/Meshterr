@@ -44,6 +44,7 @@ namespace Meshterr
         private float minElevation;
         private float maxElevation;
         private int distortion = 1;
+        private float nodataValue = float.NaN;
 
         private bool normalized = false;
 
@@ -352,6 +353,13 @@ namespace Meshterr
             return (zData[x, y] - minElevation) / range;
         }
 
+        // Nodata cella esetén minElevation-t ad vissza, hogy a geometria ne törjön el
+        private float SafeZ(int x, int y)
+        {
+            float v = zData[x, y];
+            return float.IsNaN(v) ? minElevation : v;
+        }
+
         #endregion
 
         #region ERS Loader
@@ -360,7 +368,7 @@ namespace Meshterr
         {
             if (type == "Unsigned8BitInteger")
             {
-                return CellType.Signed8BitInteger;
+                return CellType.Unsigned8BitInteger;
             }
             else
                 if (type == "Unsigned16BitInteger")
@@ -413,6 +421,8 @@ namespace Meshterr
                 {
                     string buffer = myFile.ReadLine();
 
+                    if (buffer == null) continue;
+
                     if (buffer.Contains("CellType"))
                     {
                         string[] temp = buffer.Split(new char[] { '=' });
@@ -454,6 +464,16 @@ namespace Meshterr
                                                 string[] temp = buffer.Split(new char[] { '=' });
                                                 northings = Convert.ToSingle(temp[1].Trim());
                                             }
+                                            else
+                                                if (buffer.Contains("NullCellValue"))
+                                                {
+                                                    string[] temp = buffer.Split(new char[] { '=' });
+                                                    if (float.TryParse(temp[1].Trim(), System.Globalization.NumberStyles.Float,
+                                                        System.Globalization.CultureInfo.InvariantCulture, out float ndv))
+                                                    {
+                                                        nodataValue = ndv;
+                                                    }
+                                                }
                 } while (!myFile.EndOfStream);
             }
 
@@ -537,22 +557,21 @@ namespace Meshterr
                                     break;
                             }
 
-                            if (minElevation > elevation)
+                            bool isNodata = !float.IsNaN(nodataValue) && elevation == nodataValue;
+
+                            if (!isNodata)
                             {
-                                minElevation = elevation;
-                            }
-                            if (maxElevation < elevation)
-                            {
-                                maxElevation = elevation;
+                                if (minElevation > elevation) minElevation = elevation;
+                                if (maxElevation < elevation) maxElevation = elevation;
                             }
 
-                            zData[x, y] = elevation;
+                            zData[x, y] = isNodata ? float.NaN : elevation;
                         }
                     }
                 }
             }
             bitmap = new Bitmap(NrOfCellsPerLine, NrOfLines, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            OffsetZ = (int)((MaxElevation - MinElevation) / 2);
+            UpdateGeometry();
             return (true);
         }
 
@@ -656,10 +675,10 @@ namespace Meshterr
 
                     for (int x = 0; x < NrOfCellsPerLine - 1; x++)
                     {
-                        GL.Vertex3(x * XDimension - OffsetX, y * YDimension - OffsetY, (zData[x, y] - OffsetZ) * Distoration);
-                        GL.Vertex3(x * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (zData[x, y + 1]- OffsetZ) * Distoration);
-                        GL.Vertex3((x + 1) * XDimension - OffsetX, y * YDimension - OffsetY, (zData[x + 1, y]- OffsetZ) * Distoration);
-                        GL.Vertex3((x + 1) * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (zData[x + 1, y + 1] - OffsetZ) * Distoration);
+                        GL.Vertex3(x * XDimension - OffsetX, y * YDimension - OffsetY, (SafeZ(x, y) - OffsetZ) * Distoration);
+                        GL.Vertex3(x * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (SafeZ(x, y + 1) - OffsetZ) * Distoration);
+                        GL.Vertex3((x + 1) * XDimension - OffsetX, y * YDimension - OffsetY, (SafeZ(x + 1, y) - OffsetZ) * Distoration);
+                        GL.Vertex3((x + 1) * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (SafeZ(x + 1, y + 1) - OffsetZ) * Distoration);
                     }
 
                     GL.End();
@@ -693,22 +712,22 @@ namespace Meshterr
                         GL.Color3(RsgPalette.InterColor(NormalizedElevation(x, y)));
                         //GL.Color3(RsgPalette.InterColor(df.Normal(x,y)));
                         GL.Normal3(nData[x, y].X, nData[x, y].Y, nData[x, y].Z);
-                        GL.Vertex3(x * XDimension - OffsetX, y * YDimension - OffsetY, (zData[x, y] - OffsetZ) * Distoration);
+                        GL.Vertex3(x * XDimension - OffsetX, y * YDimension - OffsetY, (SafeZ(x, y) - OffsetZ) * Distoration);
 
                         GL.Color3(RsgPalette.InterColor(NormalizedElevation(x, y + 1)));
                         //GL.Color3(RsgPalette.InterColor(df.Normal(x, y+1)));
                         GL.Normal3(nData[x, y + 1].X, nData[x, y + 1].Y, nData[x, y + 1].Z);
-                        GL.Vertex3(x * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (zData[x, y + 1] - OffsetZ) * Distoration);
+                        GL.Vertex3(x * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (SafeZ(x, y + 1) - OffsetZ) * Distoration);
 
                         GL.Color3(RsgPalette.InterColor(NormalizedElevation(x + 1, y)));
                         //GL.Color3(RsgPalette.InterColor(df.Normal(x+1, y)));
                         GL.Normal3(nData[x + 1, y].X, nData[x + 1, y].Y, nData[x + 1, y].Z);
-                        GL.Vertex3((x + 1) * XDimension - OffsetX, y * YDimension - OffsetY, (zData[x + 1, y] - OffsetZ) * Distoration);
+                        GL.Vertex3((x + 1) * XDimension - OffsetX, y * YDimension - OffsetY, (SafeZ(x + 1, y) - OffsetZ) * Distoration);
 
                         GL.Color3(RsgPalette.InterColor(NormalizedElevation(x + 1, y + 1)));
                         //GL.Color3(RsgPalette.InterColor(df.Normal(x+1, y+1)));
                         GL.Normal3(nData[x + 1, y + 1].X, nData[x + 1, y + 1].Y, nData[x + 1, y + 1].Z);
-                        GL.Vertex3((x + 1) * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (zData[x + 1, y + 1] - OffsetZ) * Distoration);
+                        GL.Vertex3((x + 1) * XDimension - OffsetX, (y + 1) * YDimension - OffsetY, (SafeZ(x + 1, y + 1) - OffsetZ) * Distoration);
                     }
 
                     GL.End();
@@ -729,53 +748,58 @@ namespace Meshterr
 
             GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
             GL.Color3(Color.Chocolate);
+
+            // Bal fal (x=0), normál: -X irány
             GL.Begin(BeginMode.TriangleStrip);
+            GL.Normal3(-1.0, 0.0, 0.0);
             double left = 0 - OffsetX;
-            for (int y = 0; y < NrOfLines - 1; y++)
+            for (int y = 0; y < NrOfLines; y++)
             {
+                double z0 = float.IsNaN(zData[0, y]) ? minElevation : zData[0, y];
                 GL.Vertex3(left, y * YDimension - OffsetY, eBottom);
-                GL.Vertex3(left, (y + 1) * YDimension - OffsetY, eBottom);
-                GL.Vertex3(left, y * YDimension - OffsetY, (zData[0, y] - OffsetZ) * Distoration);
-                GL.Vertex3(left, (y + 1) * YDimension - OffsetY, (zData[0, y + 1] - OffsetZ) * Distoration);
+                GL.Vertex3(left, y * YDimension - OffsetY, (z0 - OffsetZ) * Distoration);
             }
             GL.End();
 
+            // Jobb fal (x=max), normál: +X irány
             GL.Begin(BeginMode.TriangleStrip);
+            GL.Normal3(1.0, 0.0, 0.0);
             left = (NrOfCellsPerLine - 1) * XDimension - OffsetX;
-            for (int y = 0; y < NrOfLines - 1; y++)
+            for (int y = 0; y < NrOfLines; y++)
             {
+                double z0 = float.IsNaN(zData[NrOfCellsPerLine - 1, y]) ? minElevation : zData[NrOfCellsPerLine - 1, y];
                 GL.Vertex3(left, y * YDimension - OffsetY, eBottom);
-                GL.Vertex3(left, (y + 1) * YDimension - OffsetY, eBottom);
-                GL.Vertex3(left, y * YDimension - OffsetY, (zData[NrOfCellsPerLine - 1, y]- OffsetZ) * Distoration);
-                GL.Vertex3(left, (y + 1) * YDimension - OffsetY, (zData[NrOfCellsPerLine - 1, y + 1]- OffsetZ) * Distoration);
+                GL.Vertex3(left, y * YDimension - OffsetY, (z0 - OffsetZ) * Distoration);
             }
             GL.End();
 
+            // Első fal (y=0), normál: -Y irány
             GL.Begin(BeginMode.TriangleStrip);
-            double right = 0 - OffsetY;
-            for (int x = 0; x < NrOfCellsPerLine - 1; x++)
+            GL.Normal3(0.0, -1.0, 0.0);
+            double front = 0 - OffsetY;
+            for (int x = 0; x < NrOfCellsPerLine; x++)
             {
-                GL.Vertex3(x * XDimension - OffsetX, right, eBottom);
-                GL.Vertex3((x + 1) * XDimension - OffsetX, right, eBottom);
-                GL.Vertex3(x * XDimension - OffsetX, right, (zData[x, 0]- OffsetZ) * Distoration);
-                GL.Vertex3((x + 1) * XDimension - OffsetX, right, (zData[x + 1, 0]- OffsetZ) * Distoration);
+                double z0 = float.IsNaN(zData[x, 0]) ? minElevation : zData[x, 0];
+                GL.Vertex3(x * XDimension - OffsetX, front, eBottom);
+                GL.Vertex3(x * XDimension - OffsetX, front, (z0 - OffsetZ) * Distoration);
             }
             GL.End();
 
+            // Hátsó fal (y=max), normál: +Y irány
             GL.Begin(BeginMode.TriangleStrip);
-            right = (NrOfLines - 1) * YDimension - OffsetY;
-            for (int x = 0; x < NrOfCellsPerLine - 1; x++)
+            GL.Normal3(0.0, 1.0, 0.0);
+            double back = (NrOfLines - 1) * YDimension - OffsetY;
+            for (int x = 0; x < NrOfCellsPerLine; x++)
             {
-                GL.Vertex3(x * XDimension - OffsetX, right, eBottom);
-                GL.Vertex3((x + 1) * XDimension - OffsetX, right, eBottom);
-                GL.Vertex3(x * XDimension - OffsetX, right, (zData[x, NrOfLines - 1]- OffsetZ) * Distoration);
-                GL.Vertex3((x + 1) * XDimension - OffsetX, right, (zData[x + 1, NrOfLines - 1]- OffsetZ) * Distoration);
+                double z0 = float.IsNaN(zData[x, NrOfLines - 1]) ? minElevation : zData[x, NrOfLines - 1];
+                GL.Vertex3(x * XDimension - OffsetX, back, eBottom);
+                GL.Vertex3(x * XDimension - OffsetX, back, (z0 - OffsetZ) * Distoration);
             }
             GL.End();
 
-            //A terepmodell alsó lapja
-
+            //A terepmodell alsó lapja, normál: -Z irány
             GL.Color3(Color.Brown);
+            GL.Normal3(0.0, 0.0, -1.0);
             GL.Begin(BeginMode.Triangles);
 
             GL.Vertex3(0 - OffsetX, 0 - OffsetY, eBottom);
@@ -808,13 +832,13 @@ namespace Meshterr
                 {
                     for (int x = 1; x < NrOfCellsPerLine - 1; x++)
                     {
-                        Zdx = ((ZData[x + 1, y - 1] - ZData[x - 1, y - 1]) / Rdx) +
-                              ((ZData[x + 1, y + 0] - ZData[x - 1, y + 0]) / Rdx) +
-                              ((ZData[x + 1, y + 1] - ZData[x - 1, y + 1]) / Rdx);
+                        Zdx = ((SafeZ(x + 1, y - 1) - SafeZ(x - 1, y - 1)) / Rdx) +
+                              ((SafeZ(x + 1, y + 0) - SafeZ(x - 1, y + 0)) / Rdx) +
+                              ((SafeZ(x + 1, y + 1) - SafeZ(x - 1, y + 1)) / Rdx);
 
-                        Zdy = ((ZData[x + 1, y + 1] - ZData[x + 1, y - 1]) / Rdy) +
-                              ((ZData[x + 0, y + 1] - ZData[x + 0, y - 1]) / Rdy) +
-                              ((ZData[x - 1, y + 1] - ZData[x - 1, y - 1]) / Rdy);
+                        Zdy = ((SafeZ(x + 1, y + 1) - SafeZ(x + 1, y - 1)) / Rdy) +
+                              ((SafeZ(x + 0, y + 1) - SafeZ(x + 0, y - 1)) / Rdy) +
+                              ((SafeZ(x - 1, y + 1) - SafeZ(x - 1, y - 1)) / Rdy);
 
                         nData[x, y] = new Vector3d(-Zdx / 3.0, -Zdy / 3.0, 1.0);
                     }

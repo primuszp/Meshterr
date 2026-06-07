@@ -210,6 +210,16 @@ namespace Meshterr
                     data[2 * x + 1, 2 * y + 2] = getVector(0.5f, 0.0f);
                 }
             }
+
+            // A folt-iteráció csak [0..W-2, 0..H-2]-t fed le; a jobb és alsó szél
+            // eredeti csúcsait külön kell bemásolni, különben nullán maradnak.
+            int lastX = dem.NrOfCellsPerLine - 1;
+            int lastY = dem.NrOfLines - 1;
+            for (int y = 0; y < dem.NrOfLines; y++)
+                data[2 * lastX, 2 * y] = new Vector3d(dem.XDimension * lastX, dem.YDimension * y, dem.ZData[lastX, y]);
+            for (int x = 0; x < dem.NrOfCellsPerLine - 1; x++)
+                data[2 * x, 2 * lastY] = new Vector3d(dem.XDimension * x, dem.YDimension * lastY, dem.ZData[x, lastY]);
+
             return (data);
         }
 
@@ -234,6 +244,16 @@ namespace Meshterr
                     data[2 * x + 1, 2 * y + 2] = getElevation(0.5f, 0.0f);
                 }
             }
+
+            // A jobb szél és alsó szél eredeti magasság-csúcsai kimaradnának,
+            // mert a ciklus csak [0..W-2, 0..H-2] foltokat fed le.
+            int lastX = dem.NrOfCellsPerLine - 1;
+            int lastY = dem.NrOfLines - 1;
+            for (int y = 0; y < dem.NrOfLines; y++)
+                data[2 * lastX, 2 * y] = dem.ZData[lastX, y];
+            for (int x = 0; x < dem.NrOfCellsPerLine - 1; x++)
+                data[2 * x, 2 * lastY] = dem.ZData[x, lastY];
+
             return (data);
         }
 

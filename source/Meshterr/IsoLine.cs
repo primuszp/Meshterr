@@ -69,28 +69,37 @@ namespace Meshterr
             {
                 for (int x = 0; x < rsg.NrOfCellsPerLine - 1; x++)
                 {
-                    List<Vector3d> points = Szintvonal(new Vector3d(x, y, rsg.ZData[x, y]), new Vector3d(x, y + 1, rsg.ZData[x, y + 1]), new Vector3d(x + 1, y, rsg.ZData[x + 1, y]), level);
+                    float z00 = rsg.ZData[x,     y    ];
+                    float z01 = rsg.ZData[x,     y + 1];
+                    float z10 = rsg.ZData[x + 1, y    ];
+                    float z11 = rsg.ZData[x + 1, y + 1];
 
                     GL.Color3(Color.Brown);
                     GL.LineWidth(2.5f);
 
-                    GL.Begin(BeginMode.Lines);
-
-                    for (int i = 0; i < points.Count; i++)
+                    // Felső háromszög: (x,y) → (x,y+1) → (x+1,y)
+                    if (!float.IsNaN(z00) && !float.IsNaN(z01) && !float.IsNaN(z10))
                     {
-                        GL.Vertex3(points[i].X * rsg.XDimension - offsetX, points[i].Y * rsg.YDimension - offsetY, (points[i].Z - offsetZ) * rsg.Distoration);
+                        List<Vector3d> points = Szintvonal(
+                            new Vector3d(x, y, z00), new Vector3d(x, y + 1, z01), new Vector3d(x + 1, y, z10), level);
+
+                        GL.Begin(BeginMode.Lines);
+                        for (int i = 0; i < points.Count; i++)
+                            GL.Vertex3(points[i].X * rsg.XDimension - offsetX, points[i].Y * rsg.YDimension - offsetY, (points[i].Z - offsetZ) * rsg.Distoration);
+                        GL.End();
                     }
 
-                    GL.End();
-
-                    List<Vector3d> points2 = Szintvonal(new Vector3d(x, y + 1, rsg.ZData[x, y + 1]), new Vector3d(x + 1, y, rsg.ZData[x + 1, y]), new Vector3d(x + 1, y + 1, rsg.ZData[x + 1, y + 1]), level);
-                    
-                    GL.Begin(BeginMode.Lines);
-                    for (int i = 0; i < points2.Count; i++)
+                    // Alsó háromszög: (x,y+1) → (x+1,y) → (x+1,y+1)
+                    if (!float.IsNaN(z01) && !float.IsNaN(z10) && !float.IsNaN(z11))
                     {
-                        GL.Vertex3(points2[i].X * rsg.XDimension - offsetX, points2[i].Y * rsg.YDimension - offsetY, (points2[i].Z - offsetZ) * rsg.Distoration);
+                        List<Vector3d> points2 = Szintvonal(
+                            new Vector3d(x, y + 1, z01), new Vector3d(x + 1, y, z10), new Vector3d(x + 1, y + 1, z11), level);
+
+                        GL.Begin(BeginMode.Lines);
+                        for (int i = 0; i < points2.Count; i++)
+                            GL.Vertex3(points2[i].X * rsg.XDimension - offsetX, points2[i].Y * rsg.YDimension - offsetY, (points2[i].Z - offsetZ) * rsg.Distoration);
+                        GL.End();
                     }
-                    GL.End();
                 }
             }
         }
@@ -124,7 +133,8 @@ namespace Meshterr
         {
             double min = Math.Min(p0.Z, p1.Z);
             double max = Math.Max(p0.Z, p1.Z);
-            double step = Math.Round(min / level, 0) * level;
+            // Math.Floor biztosítja, hogy a step a min alatti első szint-többszöröstől indul
+            double step = Math.Floor(min / level) * level;
 
             do
             {
@@ -143,7 +153,9 @@ namespace Meshterr
         {
             double t = tCalc(step, p0.Z, p1.Z);
 
-            if (t >= 0.0 && t <= 1.0)
+            // t > 0 (nem >= 0): a t=0 végpontot a szomszédos háromszög p1 végpontjaként kezeli,
+            // így megosztott csúcsnál nem keletkezik dupla pont
+            if (t > 0.0 && t <= 1.0)
             {
                 points.Add(CalcPoint(t, p0, p1));
                 return (true);
@@ -156,7 +168,9 @@ namespace Meshterr
 
         private double tCalc(double z, double z0, double z1)
         {
-            return ((z - z0) / (-z0 + z1));
+            double dz = z1 - z0;
+            if (Math.Abs(dz) < 1e-10) return -1.0; // vízszintes él: nincs metszés
+            return (z - z0) / dz;
         }
 
         private Vector3d CalcPoint(double t, Vector3d p0, Vector3d p1)
